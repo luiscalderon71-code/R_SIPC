@@ -1,14 +1,12 @@
 server <- function(input, output, session) {
      
      
-     observeEvent(input$filtroProducto_txt, {
-          
-          #print(input$filtroProducto_txt)
+     observeEvent(input$tab1_filtroProducto_txt, {
           
           # Filtro el vector.
-          if (input$filtroProducto_txt != '') {
+          if (input$tab1_filtroProducto_txt != '') {
                vec_Producto_Filtrado <- str_subset(vec_Producto,
-                                                   regex(input$filtroProducto_txt,
+                                                   regex(input$tab1_filtroProducto_txt,
                                                          ignore_case = TRUE))
           } else {
                vec_Producto_Filtrado <- vec_Producto
@@ -16,26 +14,41 @@ server <- function(input, output, session) {
 
           # Le mando los nuevos valores a "producto_cbx".
           updatePickerInput(session = session,
-                            inputId = "producto_cbx",
+                            inputId = "tab1_producto_cbx",
+                            choices = vec_Producto_Filtrado)
+          
+     })
+     
+     observeEvent(input$tab2_filtroProducto_txt, {
+          
+          # Filtro el vector.
+          if (input$tab2_filtroProducto_txt != '') {
+               vec_Producto_Filtrado <- str_subset(vec_Producto,
+                                                   regex(input$tab2_filtroProducto_txt,
+                                                         ignore_case = TRUE))
+          } else {
+               vec_Producto_Filtrado <- vec_Producto
+          }
+          
+          # Le mando los nuevos valores a "producto_cbx".
+          updatePickerInput(session = session,
+                            inputId = "tab2_producto_cbx",
                             choices = vec_Producto_Filtrado)
           
      })
      
      
-     observeEvent(list(input$producto_cbx, input$incluirofertas_chk), {
+     observeEvent(list(input$tab1_producto_cbx, input$tab1_incluirofertas_chk), {
      
           # Muestro los barrios.
           vDF_Filtrado <- vDF_Main
           
-          print(input$filtroProducto_txt)
-          print(input$incluir_ofertas)
-          
-          if (length(input$producto_cbx)) {
+          if (length(input$tab1_producto_cbx)) {
                vDF_Filtrado <- vDF_Filtrado |>
-                               filter(producto %in% input$producto_cbx)
+                               filter(producto %in% input$tab1_producto_cbx)
           }
           
-          if (input$incluirofertas_chk == 1) {
+          if (input$tab1_incluirofertas_chk == 1) {
                vDF_Filtrado <- vDF_Filtrado |>
                     filter(es_oferta == 1)
           }
@@ -49,34 +62,35 @@ server <- function(input, output, session) {
           print(length(vec_Barrios))
           
           updatePickerInput(session = session,
-                            inputId = "barrios_cbx",
+                            inputId = "tab1_barrios_cbx",
                             choices = vec_Barrios)        
      })
      
      
-     # =======================================================
-     # 2. PROCESAMIENTO DE DATOS REACTIVO
-     # =======================================================
-     
-     react_DatosProcesados <- reactive({
+     # Reactive para el Tab1
+     react_DatosProcesados_tab1 <- reactive({
           
           # Valido que al menos haya algún producto seleccionado para no calcular sobre el vacío
-          req(input$producto_cbx)
+          req(input$tab1_producto_cbx)
           
           vDF_Filtrado <- vDF_Main |> 
-               filter(producto %in% input$producto_cbx)
+               filter(producto %in% input$tab1_producto_cbx)
           
           # Aplico filtro de barrios (si el usuario seleccionó alguno).
-          if (length(input$barrios_cbx)) {
+          if (length(input$tab1_barrios_cbx)) {
                vDF_Filtrado <- vDF_Filtrado |> 
-                    filter(barrio %in% input$barrios_cbx)
+                    filter(barrio %in% input$tab1_barrios_cbx)
           }
           
-          # Aplico filtro de ofertas
-          if (!input$incluirofertas_chk) {
+          # Aplico filtro de ofertas.
+          if (input$tab1_incluirofertas_chk == 0) {
+               vDF_Filtrado <- vDF_Filtrado |> 
+                    filter(es_oferta == 1)
+          } else {
                vDF_Filtrado <- vDF_Filtrado |> 
                     filter(es_oferta == 0)
-          }
+          }  
+          
           
           # --- CÁLCULO DEL CRECIMIENTO ACUMULADO: ESTILO IPC ---
           vDF_Crecimiento <- vDF_Filtrado |>
@@ -99,14 +113,54 @@ server <- function(input, output, session) {
           
           return(vDF_Crecimiento)
      })     
-     # =======================================================
-     # 3. RENDERIZADO DEL GRÁFICO (PLOTLY)
-     # =======================================================
+
+     # Reactive para el Tab1
+     react_DatosProcesados_tab2 <- reactive({
+          
+          # Valido que al menos haya algún producto seleccionado para no calcular sobre el vacío
+          req(input$tab1_producto_cbx)
+          
+          vDF_Filtrado <- vDF_Main |> 
+               filter(producto %in% input$tab1_producto_cbx)
+          
+          # Aplico filtro de ofertas.
+          if (input$tab1_incluirofertas_chk == 0) {
+               vDF_Filtrado <- vDF_Filtrado |> 
+                    filter(es_oferta == 1)
+          } else {
+               vDF_Filtrado <- vDF_Filtrado |> 
+                    filter(es_oferta == 0)
+          }  
+          
+          
+          # --- CÁLCULO DEL CRECIMIENTO ACUMULADO: ESTILO IPC ---
+          vDF_Crecimiento <- vDF_Filtrado |>
+               # Agrupo por producto y por semana para promediar precios si hay varios comercios
+               group_by(producto, barrio) |> 
+               summarise(precio_prom = mean(precio,
+                                            na.rm = TRUE),
+                         .groups = "drop") |> 
+               # Vuelvo a agrupar solo por producto-}.
+               group_by(producto) |> 
+               # Calculo la variación acumulada respecto al precio de la PRIMERA semana
+               mutate(
+                    precio_base = first(precio_prom),
+                    crecimiento_pct = ((precio_prom - precio_base) / precio_base) * 100
+               ) |> 
+               
+               # Opcional: NO filtro la primera semana. 
+               # Al ser la base, dará exactamente 0% (ideal para ver el punto de partida en el gráfico).
+               ungroup()
+          
+          return(vDF_Crecimiento)
+     })     
      
-     output$grafico_crecimiento <- renderPlotly({
+     
+     # RENDERIZADO DEL GRÁFICO (PLOTLY)
+     output$tab1_grafico_crecimiento <- renderPlotly({
           
           # Obtenemos los datos filtrados y calculados
-          datos <- react_DatosProcesados()
+          datos <- react_DatosProcesados_tab1()
           
           # Si tras los filtros el dataframe queda vacío, evitamos el error
           req(nrow(datos) > 0)
@@ -123,7 +177,25 @@ server <- function(input, output, session) {
           
           # Lo transformamos en interactivo con Plotly, mapeando nuestro 'text' personalizado para el tooltip
           ggplotly(p, tooltip = "text")
-     })     
+     })    
+     
+     output$tab2_mapa_resultados <- renderLeaflet({
+          leaflet() |>
+          addTiles() |>  # Mapa base
+          addPolygons(data = vDF_Barrios,
+                      color = "#2c3e50",       # Color de la línea de los bordes
+                      weight = 1.5,             # Grosor de la línea
+                      fillColor = "#3498db",    # Color de relleno de los polígonos
+                      fillOpacity = 0.5,        # Transparencia del relleno
+                      
+                      # Esto hace que se resalte la zona cuando pasás el mouse (interactividad)
+                      highlightOptions = highlightOptions(
+                           weight = 3,
+                           color = "#e74c3c",
+                           bringToFront = TRUE
+                      ))
+     })
+     
      
 }
 

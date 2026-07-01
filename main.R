@@ -8,6 +8,8 @@ library(plotly)
 library(leaflet)
 library(lubridate)
 library(stringr)
+library(styler)
+
 
 # Seteos.
 # -------------------------------------------------------------------------------------
@@ -28,12 +30,12 @@ source("./R_SIPC/ui.r")
 # El DF principal y el DF de barrios.
 # -------------------------------------------------------------------------------------
 
-vLista_Resultado <- fCargarDFs("./Datos/SIPC")
-
-vDF_Barrios <- vLista_Resultado$DF_Barrios
-vDF_Main <- vLista_Resultado$DF_Main
-
-rm(vLista_Resultado)
+# vLista_Resultado <- fCargarDFs("./Datos/SIPC")
+# 
+# vDF_Barrios <- vLista_Resultado$DF_Barrios
+# vDF_Main <- vLista_Resultado$DF_Main
+# 
+# rm(vLista_Resultado)
 
 # Vectores con las categorías para: es_oferta; barrio; producto.
 # -------------------------------------------------------------------------------------

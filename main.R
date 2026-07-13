@@ -9,6 +9,7 @@ library(leaflet)
 library(lubridate)
 library(stringr)
 library(styler)
+library(bslib)
 
 
 # Seteos.
@@ -30,12 +31,28 @@ source("./R_SIPC/ui.r")
 # El DF principal y el DF de barrios.
 # -------------------------------------------------------------------------------------
 
-# vLista_Resultado <- fCargarDFs("./Datos/SIPC")
-# 
-# vDF_Barrios <- vLista_Resultado$DF_Barrios
-# vDF_Main <- vLista_Resultado$DF_Main
-# 
-# rm(vLista_Resultado)
+vLista_Resultado <- fCargarDFs("./Datos/SIPC")
+
+# Los dos dataframes.
+vDF_Barrios <- vLista_Resultado$DF_Barrios
+vDF_Main <- vLista_Resultado$DF_Main
+
+# Estos pasos se justifican en el "análisis exploratorio".
+vDF_Main <- vDF_Main |>
+            group_by(producto) |>
+            mutate(p99_producto = quantile(precio,
+                                           0.99,
+                                           na.rm = TRUE),
+                   es_outlier = precio > p99_producto) |>
+            filter(!es_outlier) |>
+            ungroup()     
+
+# Ajusto el nombre del vDF_Barrios.
+vDF_Barrios <- vDF_Barrios |>
+               rename(barrio = BARRIO)
+
+# Limpio.
+rm(vLista_Resultado)
 
 # Vectores con las categorías para: es_oferta; barrio; producto.
 # -------------------------------------------------------------------------------------

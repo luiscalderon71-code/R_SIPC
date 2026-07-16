@@ -10,34 +10,25 @@ library(lubridate)
 library(stringr)
 library(styler)
 library(bslib)
-
-
-# Seteos.
-# -------------------------------------------------------------------------------------
-
-     # Carpeta de trabajo.
-     setwd("C:/Users/luis/OneDrive - Ingenieros Consultores Asociados/FCEA/2026 - Ciencia de Datos en R/Proyecto")
-     
-     # Constantes.
-     cTodos <- "TODOS"
+library(here)
 
 # Importo otros archivos R (funciones).
 # -------------------------------------------------------------------------------------
 
-source("./R_SIPC/cargarDatos.r")
-source("./R_SIPC/server.r")
-source("./R_SIPC/ui.r")
+source(here("R_SIPC", "cargarDatos.R"))
+source(here("R_SIPC", "server.R"))
+source(here("R_SIPC", "ui.R"))
 
 # El DF principal y el DF de barrios.
 # -------------------------------------------------------------------------------------
 
-vLista_Resultado <- fCargarDFs("./Datos/SIPC")
+vLista_Resultado <- fCargarDFs(here("R_SIPC", "Datos"))
 
 # Los dos dataframes.
 vDF_Barrios <- vLista_Resultado$DF_Barrios
 vDF_Main <- vLista_Resultado$DF_Main
 
-# Estos pasos se justifican en el "análisis exploratorio".
+# Estos pasos se justifican en el "análisis exploratorio" !!!
 vDF_Main <- vDF_Main |>
             group_by(producto) |>
             mutate(p99_producto = quantile(precio,
@@ -73,7 +64,7 @@ vec_Producto <- vDF_Main |>
      arrange(producto) |>
      pull(producto)
 
-
-# Ejecutar la app
+# Ejecutar la app de "shiny".
+# -------------------------------------------------------------------------------------
 shinyApp(ui,
          server)

@@ -1,0 +1,345 @@
+---
+title: "Trabajo Final (Análisis Exploratorio)"
+author: Luis Alberto Calderón
+format: 
+  pdf:
+    geometry:
+      - top=1cm
+      - bottom=1cm
+      - left=1.5cm
+      - right=1.5cm
+editor: visual
+execute:
+  echo: true
+  message: false
+  warning: false
+---
+
+## Origen de los datos
+
+Los datos de origen provienen del **Instituto Nacional de Estadística** correspondientes al **Sistema de Información de Precios al Consumidor** (año 2025)**.**
+
+Se utilizan tres sets de datos:
+
+-   **Precios:** Lista de precios diarios de productos desde enero a diciembre 2025.
+
+-   **Productos:** Detalle de productos en base de datos SIPC.
+
+-   **Establecimientos:** Detalle de establecimientos registrados en SIPC.
+
+## Librerías y módulos externos
+
+```{r}
+
+# Librerías
+library(tidyverse)
+library(readr)
+library(sf)
+library(naniar)
+library(knitr)
+library(ggplot2)
+library(corrplot)
+library(here)
+
+# Carga de módulos externos
+source(here("cargarDatos.r"))
+```
+
+## Carga de datos
+
+Los datos se cargan a partir del archivo **cargarDatos.r**. La estructura del set de datos es:
+
+-   **id_preciodiario**: Identificador (clave) del registro.
+
+-   **id_establecimiento**: Identificador del establecimiento donde se releva el precio.
+
+-   **id_producto**: Identificador del producto del cual se releva el precio.
+
+-   **fecha**: Fecha en que se realiza el relevamiento.
+
+-   **es_oferta**: Indica si el relevamiento del precio corresponde a una oferta.
+
+-   **precio**: Precio relevado.
+
+-   **barrio**: Barrio donde se ubica el establecimiento.
+
+-   **producto**: Descriptor alfanumérico con el tipo del producto.
+
+-   **marca**: Marca del producto.
+
+-   **especificacion**: Tipo de empaquetamiento del producto
+
+-   **nombre**: Nombre del producto.
+
+-   **semana**: Número de semana del año que corresponde a la "fecha".
+
+-   **mes**: Número de mes del año que corresponde a la "fecha".
+
+```{r}
+
+vLista_Resultado <- fCargarDFs(here("Datos"))
+
+vDF_Main <- vLista_Resultado$DF_Main
+```
+
+## Auditoría de calidad
+
+### 1. Análisis de valores NA
+
+El primer paso es analizar la cantidad de valores NA en cada columna.
+
+```{r}
+
+vRes <- vDF_Main |> summarise(across(everything(),
+                                     ~sum(is.na(.x)))) |>
+                    pivot_longer(everything(),
+                                 names_to = "columna",
+                                 values_to = "n_nas") |>
+                    arrange(desc(n_nas))
+
+vRes |> kable(caption = "Tabla 1: Cantidad de valores NA por columna",
+              col.names = c("Nombre de columna",
+                            "Cantidad de valores NA"),
+              digits = 0,
+              align = "lccccccc")     
+```
+
+### 2. Cardinalidad y coherencia
+
+Este bloque de código tiene como objetivo evaluar la **consistencia temporal y el nivel de cobertura** de los relevamientos de precios en cada **barrio**.
+
+Se crea un *"ranking de calidad de relevamiento"* para identificar los barrios que tienen datos incompletos o períodos de tiempo muy cortos.
+
+```{r}
+
+vRes <- vDF_Main |> 
+        group_by(barrio) |>
+        summarise(n_registros = n(),
+                  n_productos_distintos = n_distinct(id_producto),
+                  rango_dias = max(fecha) - min(fecha)) |>
+        arrange(rango_dias) |>
+        filter (rango_dias < 364)
+
+vRes |> kable(caption = "Tabla 2: Cardinalidad y coherencia",
+              col.names = c("Barrio",
+                            "Cantidad registros",
+                            "Cantidad productos",
+                            "Cantidad días"),
+              digits = 0,
+              align = "lccccccc")  
+```
+
+### 3. Reglas de negocio
+
+Este bloque cuantifica qué tan *"sucios"* o extremos están los precios en el dataset; esto es fundamental para decidir si se requiere limpiar los datos antes de realizar cualquier análisis estadístico o espacial.
+
+```{r}
+
+vRes <- vDF_Main |> 
+        summarise(porcentaje_cero = mean(precio <= 0, na.rm = TRUE) * 100,
+        porcentaje_outliers = mean(precio > quantile(precio,
+                                                     0.99,
+                                                     na.rm = TRUE),
+                                   na.rm = TRUE) * 100)
+
+vRes |> kable(caption = "Tabla 3: Reglas de negocio",
+              col.names = c("Porcentaje cero",
+                            "Porcentaje outliers"),
+              digits = 4,
+              align = "lccccccc") 
+```
+
+La calidad de los microdatos del SIPC para el periodo analizado presenta una alta consistencia lógica, sin registros de precios nulos o negativos.
+
+Existe - aproximadamente - un 1% de datos extremos, es decir aproximadamente 78000 precios, por lo tanto, se procede a depurar los datos mediante el filtrado de valores atípicos (outliers) **segmentado por producto.**
+
+Esto permite mejorar la calidad del análisis al garantizar que la depuración sea metodológicamente coherente con la heterogeneidad de los productos relevados. Este enfoque permite preservar la representatividad de las categorías de alta gama y mitiga sesgos estadísticos, lo que asegura que las medidas de tendencia central sean robustas y que las comparaciones espaciales entre barrios se realicen sobre indicadores precisos y comparables, libres de distorsiones provocadas por valores extremos.
+
+```{r}
+
+vDF_Main <- vDF_Main |>
+            group_by(producto) |>
+            mutate(p99_producto = quantile(precio,
+                                           0.99,
+                                           na.rm = TRUE),
+                   es_outlier = precio > p99_producto) |>
+            filter(!es_outlier) |>
+            ungroup()
+```
+
+**Este paso se incluirá en la segunda parte (Shiny).**
+
+### 4. Análisis de brecha de precios por barrio
+
+Para analizar la variabilidad espacial de precios, se aplica una técnica de extremos basada en deciles:
+
+-   Se calculó la brecha relativa promedio por barrio respecto al nivel departamental;
+
+-   Se aislaron el primer y décimo decil, segmentando el 10% de las zonas más económicas y el 10% de las más costosas.
+
+Esto permite reducir el ruido estadístico al contrastar los polos del mercado, facilita la identificación de patrones territoriales y barrios con desviaciones significativas respecto del promedio departamental con desviaciones significativas y permitiendo un análisis preciso de la dispersión de precios en Montevideo.
+
+```{r}
+
+vResumen <- vDF_Main |>
+            group_by(barrio,
+                     producto) |>
+            summarise(precio_medio_barrio = mean(precio)) |>
+            group_by(producto) |>
+            mutate(precio_promedio_departamental = mean(precio_medio_barrio),
+                   brecha_relativa = (precio_medio_barrio - precio_promedio_departamental) / precio_promedio_departamental)
+
+# Brecha media por barrio (a través de todos los productos).
+vResumen_barrios <- vResumen |>
+                    group_by(barrio) |>
+                    summarise(brecha_media = mean(brecha_relativa,
+                                                  na.rm = TRUE))
+
+# Límites de los deciles (10% inferior y 10% superior).
+vLimites <- quantile(vResumen_barrios$brecha_media,
+                     probs = c(0.1,
+                               0.9),
+                     na.rm = TRUE)
+
+# Barrios que pertenecen a esos extremos.
+vBarrios_extremos <- vResumen_barrios |>
+                     filter(brecha_media <= vLimites[1] | brecha_media >= vLimites[2])|>
+                     mutate(grupo = ifelse(brecha_media <= vLimites[1],
+                                           "Decil 1 (Más baratos)",
+                                           "Decil 10 (Más caros)"))
+
+# Visualizar (gráfico de barras horizontales).
+ggplot(vBarrios_extremos, aes(x = reorder(barrio,
+                                          brecha_media),
+                              y = brecha_media,
+                              fill = grupo)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Comparativa de extremos",
+       x = "Barrio",
+       y = "Brecha relativa respecto al promedio departamental")
+
+```
+
+### 5. Análisis de volatilidad de precios
+
+Para evaluar la previsibilidad del mercado, se implementó un indicador de *"volatilidad de precios"* basado en el *"coeficiente de variación"* (CV) por barrio y producto.
+
+-   El proceso excluyó aquellos registros con insuficiencia de datos (menos de dos observaciones por producto) para garantizar robustez estadística, normalizando la dispersión mediante la relación entre la desviación estándar y el precio medio;
+
+-   Se consolidó un *"índice de inestabilidad media"* por barrio, del cual se extrajeron los diez registros con mayor nivel de variabilidad, para identificar las zonas donde el costo de la canasta relevada presenta la mayor fluctuación temporal.
+
+```{r}
+
+vDF_Estabilidad <- vDF_Main |>
+                   group_by(barrio,
+                            producto) |>
+                   filter(n() >= 2) |>
+                   summarise(cv = sd(precio,
+                                     na.rm = TRUE) / mean(precio,
+                                                          na.rm = TRUE),
+                   .groups = "drop") |>
+                   group_by(barrio) |>
+                   summarise(inestabilidad_media = mean(cv,
+                                                        na.rm = TRUE),
+                   n_productos_analizados = n()) |>
+                   arrange(desc(inestabilidad_media)) |>
+                   head(10)
+
+vDF_Estabilidad |> kable(caption = "Tabla 4: Volatilidad de precios",
+                   col.names = c("Barrio", "Inestabilidad Media", "Productos Analizados"),
+                   digits = 4,
+                   align = "lccccccc") 
+```
+
+### 6. El impacto real de las ofertas de los productos
+
+Este bloque analiza la estrategia comercial de los establecimientos mediante dos procesos:
+
+-   Calcula el ahorro promedio real que genera la condición de *"oferta"* por cada producto comparando precios con y sin descuento;
+
+-   Determina la intensidad de las promociones en cada barrio como porcentaje del total de registros relevados;
+
+-   Integra estos indicadores con la clasificación de barrios extremos (deciles 1 y 10) para generar un gráfico de dispersión con una línea de tendencia lineal.
+
+De esta forma es posible visualizar si existe una correlación entre la *brecha de precios de un barrio* y su *frecuencia de ofertas*, facilitando así la interpretación de las dinámicas competitivas y comerciales en Montevideo.
+
+```{r}
+
+vDF_Ofertas <- vDF_Main |>
+               group_by(producto) |>
+               summarise(precio_normal = mean(precio[es_oferta == FALSE],
+                                              na.rm = TRUE),
+                         precio_oferta = mean(precio[es_oferta == TRUE],
+                                              na.rm = TRUE),
+               ahorro_promedio = (precio_normal - precio_oferta) / precio_normal) |>
+               arrange(desc(ahorro_promedio))
+
+vBarrios_Oferta <- vDF_Main |>
+                   group_by(barrio) |>
+                   summarise(tasa_ofertas = mean(es_oferta,
+                                                 na.rm = TRUE) * 100, 
+                                                 .groups = "drop") |>
+                   arrange(desc(tasa_ofertas))
+
+vComparativo <- vBarrios_extremos |>
+                left_join(vBarrios_Oferta,
+                          by = "barrio")
+
+ggplot(vComparativo,
+       aes(x = tasa_ofertas,
+           y = brecha_media,
+           color = grupo)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              color = "gray") +
+  theme_minimal() +
+  labs(title = "Relación entre intensidad de ofertas y brecha de precios",
+       x = "% de productos en oferta",
+       y = "Brecha relativa")
+```
+
+El resultado gráfico revela un patrón contraintuitivo: los barrios con mayores costos (*Decil 10*) presentan una mayor intensidad de promociones.
+
+Esto sugiere que, en los sectores más costosos del mercado minorista, las ofertas operan como un mecanismo correctivo para mitigar el impacto de precios base elevados, mientras que los barrios del *Decil 1* alcanzan su competitividad mediante una estructura de precios base más reducida, con una baja dependencia estratégica de las ofertas.
+
+### 7. Índice de dispersión de precios
+
+Se calcula el *Índice de Dispersión de Precios (IDP)* por categoría, normalizando el rango intercuartílico mediante la mediana.
+
+Este indicador permite identificar productos caracterizados por una alta variabilidad de precios que dificulta la capacidad de referencia del consumidor, frente a otros productos donde la competencia o la regulación convergen en niveles de precios uniformes.
+
+Esto permite entender la *"transparencia de mercado"* señalando las categorías donde la información al consumidor es más necesaria.
+
+```{r}
+
+vIDP <- vDF_Main |>
+        group_by(producto) |>
+        summarise(q1 = quantile(precio,
+                                0.25,
+                                na.rm = TRUE),
+        q3 = quantile(precio,
+                      0.75,
+                      na.rm = TRUE),
+        mediana = median(precio, na.rm = TRUE),
+        idp = (q3 - q1) / mediana) |>
+        arrange(desc(idp))
+
+vIDP_Top10 <- vIDP |>
+              filter(idp >= quantile(idp,
+                                     0.9,
+                                     na.rm = TRUE)) |>
+              arrange(desc(idp))
+
+vIDP_Top10 |> kable(caption = "Tabla 5: Índice de dispersión de precios",
+               col.names = c("Producto", "Cuartil 1", "Cuartil 3", "Mediana", "IDP"),
+                    digits = 2,
+                    align = "lccccccc") 
+
+```
+
+Este análisis permite categorizar los productos según su transparencia de mercado, revelando que categorías como **afeitadoras** y **tintas** tienen una alta variabilidad (IDP \> 1.0); esto dificulta al consumidor establecer un precio de referencia claro y sugiere una menor homogeneidad en la fijación de precios.
+
+Por el contrario, productos de consumo frecuente y frescos, como el **té** o el **zapallo**, muestran una mayor estabilidad; esto muestra una convergencia de precios resultante de una dinámica de mercado más madura o una mayor competencia informativa por parte del usuario.

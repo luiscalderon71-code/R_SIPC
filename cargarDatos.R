@@ -3,20 +3,17 @@ library(tidyverse)
 library(readr)
 library(sf)
 
-
-pRuta <- "C:/Users/luis/OneDrive - Ingenieros Consultores Asociados/FCEA/2026 - Ciencia de Datos en R/Proyecto/Datos/SIPC"
-
 # Cargar desde FGDB.
 fCargarDFs <- function(pRuta) {
 
      # Cargar el SHP de barrios
      # ------------------------------------------------------------------------------------------------
 
-     vArchivo <- file.path(pRuta, paste0("barrios", ".shp"))          
+     vArchivo <- file.path(pRuta, paste0("barriosINE", ".shp"))          
 
      cat("Cargando shapefile de barrios...", vArchivo, "\n")
      
-     vDF_Barrios <- st_read("C:/Users/luis/OneDrive - Ingenieros Consultores Asociados/FCEA/2026 - Ciencia de Datos en R/Proyecto/Datos/SIPC/BarriosINE.shp")
+     vDF_Barrios <- st_read(vArchivo)
      vDF_Barrios <- st_make_valid(vDF_Barrios)
      vDF_Barrios <- vDF_Barrios |>
                     select(BARRIO)

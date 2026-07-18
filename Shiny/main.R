@@ -12,13 +12,8 @@ library(styler)
 library(bslib)
 library(here)
 
-
-
 # Importo otros archivos R (funciones).
 # -------------------------------------------------------------------------------------
-
-here("Shiny/server.R")
-
 source(here("cargarDatos.R"))
 source(here("Shiny", "server.R"))
 source(here("Shiny", "ui.R"))
